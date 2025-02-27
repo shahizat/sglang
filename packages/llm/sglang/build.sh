@@ -1,37 +1,60 @@
 #!/usr/bin/env bash
 set -ex
 
-pip3 install compressed-tensors decord
-# Clone the repository if it doesn't exist
-echo "FLASH INFER ${SGLANG_VERSION}"
-git clone --branch=v${SGLANG_VERSION} --recursive --depth=1 https://github.com/flashinfer-ai/flashinfer /opt/flashinfer ||
-git clone --recursive --depth=1 https://github.com/flashinfer-ai/flashinfer /opt/flashinfer
-cd /opt/flashinfer
+# Set versions for FlashInfer and SGLang
+FLASHINFER_VERSION="v0.2.0"
+SGLANG_VERSION="v0.4.1.post7"
+
+# Install required system libraries
+apt-get update && \
+    apt-get install -y libavformat58 libavfilter7 && \
+    rm -rf /var/lib/apt/lists/*
+
+
+# Build FlashInfer
+echo "Building FlashInfer ${FLASHINFER_VERSION}"
+rm -rf /workspace/flashinfer
+git clone --recurse-submodules -b ${FLASHINFER_VERSION} https://github.com/flashinfer-ai/flashinfer.git /workspace/flashinfer
+cd /workspace/flashinfer
 
 export MAX_JOBS=$(nproc)
-python3 setup.py --verbose bdist_wheel --dist-dir /opt/flashinfer/wheels/ && \
-pip3 install --verbose /opt/flashinfer/wheels/flashinfer_python-*.whl
+export TORCH_CUDA_ARCH_LIST="8.7"
+export FLASHINFER_ENABLE_AOT=1
 
+pip install -e . --no-build-isolation -v
 
-echo "SG LANG ${SGLANG_VERSION}"
-cd /opt/
-git clone --branch=v${SGLANG_VERSION} --recursive --depth=1 https://github.com/sgl-project/sglang /opt/sglang ||
-git clone --recursive --depth=1 https://github.com/sgl-project/sglang /opt/sglang
-cd /opt/sglang
+# Build SGLang
+echo "Building SGLang ${SGLANG_VERSION}"
+rm -rf /workspace/sglang
+git clone --recurse-submodules -b ${SGLANG_VERSION} https://github.com/sgl-project/sglang.git /workspace/sglang
+cd /workspace/sglang
 
-sed -i '/sgl-kernel>=0.0.2.post14/d' python/pyproject.toml && \
-sed -i '/flashinfer==0.1.6/d' python/pyproject.toml && \
-sed -i '/xgrammar>=0.1.10/d' python/pyproject.toml && \
-cd sgl-kernel && \
-python3 setup.py --verbose bdist_wheel --dist-dir /opt/sglang/wheels/ && pip3 install /opt/sglang/wheels/*.whl && \
-cd .. && \
-sed -i '/return min(memory_values)/s/.*/        return None/' python/sglang_backup/srt/utils.py  && \
-sed -i '/if not memory_values:/,+1d' python/sglang_backup/srt/utils.py && \
-pip3 install -e "python[all]"
+# Remove dependencies
+sed -i '/sgl-kernel/d' python/pyproject.toml
+sed -i '/flashinfer/d' python/pyproject.toml
+sed -i '/xgrammar/d' python/pyproject.toml
 
-cd /opt/sglang
+# Build SGL Kernel
+cd sgl-kernel
+export SGL_KERNEL_ENABLE_BF16=1
+pip install -e . --no-build-isolation -v
+cd ..
 
+# Patch SGLang utils.py
+if test -f "python/sglang/srt/utils.py"; then
+    sed -i '/return min(memory_values)/s/.*/        return None/' python/sglang/srt/utils.py
+    sed -i '/if not memory_values:/,+1d' python/sglang/srt/utils.py
+fi
 
-# Optionally upload to a repository using Twine
-twine upload --verbose /opt/flashinfer/wheels/flashinfer_python*.whl || echo "Failed to upload wheel to ${TWINE_REPOSITORY_URL}"
-twine upload --verbose /opt/sglang/wheels/sglang*.whl || echo "Failed to upload wheel to ${TWINE_REPOSITORY_URL}"
+# Install SGLang
+pip3 install --no-cache-dir -e "python[all]"
+
+# Install Gemlite python packages
+pip3 install gemlite
+
+# Validate installations
+pip3 show sglang
+python3 -c 'import sglang'
+
+# Final message
+echo "Build completed successfully."

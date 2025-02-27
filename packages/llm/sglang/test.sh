@@ -1,12 +1,8 @@
 #!/bin/bash
-python3 - <<EOF
-print('testing SGLANG...')
-from sglang.test.test_utils import is_in_ci
-from sglang.utils import wait_for_server, print_highlight, terminate_process
-if is_in_ci():
-    from patch import launch_server_cmd
-else:
-    from sglang.utils import launch_server_cmd
 
-print('SGLANG OK\\n')
-EOF
+python3 -m sglang.launch_server \
+  --model-path TinyLlama/TinyLlama-1.1B-Chat-v1.0 \
+  --device cuda \
+  --dtype half \
+  --attention-backend flashinfer \
+  --mem-fraction-static 0.8
